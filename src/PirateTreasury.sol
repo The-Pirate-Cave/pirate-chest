@@ -131,6 +131,31 @@ contract PirateTreasury {
             if (coins[chest][address(0)] < amount) {
                 revert NoMoneyForYa();
             } else {
+                _diggUpTreasure(chest, token, amount, treasure);
+                emit FoundTreasure(amount);
+            }
+        } else {
+            if (coins[chest][token] < amount) {
+                revert NoMoneyForYa();
+            } else {
+                _diggUpTreasure(chest, token, amount, treasure);
+
+                require(IERC20(token).transfer(msg.sender, amount), Fuck());
+                emit FoundTreasure(amount);
+            }
+        }
+    }
+
+    function _diggUpTreasure(
+        bytes32 chest,
+        address token,
+        uint256 amount,
+        bytes calldata treasure
+    ) internal {
+        coins[chest][token] -= amount;
+
+        if (pirates[msg.sender] == chest) {
+            if (token == address(0)) {
                 coins[chest][address(0)] -= amount;
 
                 if (pirates[msg.sender] == chest) {
@@ -151,29 +176,16 @@ contract PirateTreasury {
                 if(!v) {
                     revert Fuck();
                 }
-
-                emit FoundTreasure(amount);
-            }
-        } else {
-            if (coins[chest][token] < amount) {
-                revert NoMoneyForYa();
             } else {
-                coins[chest][token] -= amount;
-
-                if (pirates[msg.sender] == chest) {
-                    require(IERC20(token).transfer(msg.sender, amount), Fuck());
-                    emit FoundTreasure(amount);
-                    return;
-                }
-
-                (address kuey, ECDSA.RecoverError err) = ECDSA.tryRecover(chest, treasure);
-                if (chestKeuys[chest] != kuey) {
-                    revert NoMoneyForYa();
-                }
-
                 require(IERC20(token).transfer(msg.sender, amount), Fuck());
                 emit FoundTreasure(amount);
+                return;
             }
+        }
+
+        (address kuey, ECDSA.RecoverError err) = ECDSA.tryRecover(chest, treasure);
+        if (chestKeuys[chest] != kuey) {
+            revert NoMoneyForYa();
         }
     }
 
