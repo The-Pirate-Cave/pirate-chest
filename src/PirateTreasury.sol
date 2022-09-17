@@ -55,6 +55,7 @@ pragma solidity >=0.8.4;
 
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/tokens/ERC20/IERC20.sol";
 
 contract PirateTreasury {
 
@@ -65,7 +66,8 @@ contract PirateTreasury {
 
     error NoMoneyForYa();
     
-    uint256 public confiscatedCoins;
+    //uint256 public confiscatedCoins;
+    mapping(address => uint256) public confiscatedCoins;
 
     // Some addresses are cursed for abandoning the crew (Sidsel.eth) (not pointing any fingers)
     // To see the full cursed list
@@ -78,8 +80,8 @@ contract PirateTreasury {
     // hash -> chest 
     mapping(bytes32 => address) public chestKeuys;
 
-    // hash -> amount buried in treasure
-    mapping(bytes32 => uint256) private coins;
+    // hash -> token -> amount buried in treasure
+    mapping(bytes32 => mapping(address => uint256)) private coins;
 
     constructor() {
         cursed[0x7447aa707b577D1EB65f8f7102fd3A54Ad81fa6d] = true; // <------------- Sidsel.eth
@@ -92,16 +94,29 @@ contract PirateTreasury {
     /// @notice Use thissss to burry yar chest somewhere
     /// @param chest - geolocation hash
     /// @param keuy - address that can sign message that unlocks
-    function burryChest(bytes32 chest, address keuy) external payable {
-        if (cursed[msg.sender]) {
+    function burryChest(address token, uint256 amount, bytes32 chest, address keuy) external payable {
+        if (token == address(0)) {
+            if (cursed[msg.sender]) {
             // take money yarrrrr'
-            confiscatedCoins += msg.value;
-        } else {
-            pirates[msg.sender] = chest;
-            chestKeuys[chest] = keuy;
-            coins[chest] += msg.value;
-            emit ChestBurried(msg.value);
+                confiscatedCoins += msg.value;
+            } else {
+                pirates[msg.sender] = chest;
+                chestKeuys[chest] = keuy;
+                coins[chest][address(0)] += msg.value;
+                emit ChestBurried(msg.value);
         }
+        } else {
+            if (cursed[msg.sender]) {
+                confiscatedCoins[token] += value;
+            } else {
+                pirate[msg.sender] = chest;
+                chestKeuys[chest] = keuy;
+                coins[chest][token] += amount;
+                require(IERC20(token).transferFrom(msg.sender, address(this), amount), "Transfer unsuccessful");
+                emit ChestBurried(amount);
+            }
+        }
+
     }
 
     // TODO: we don't care about replay attacks, true pirate will kill whoever did it
@@ -111,32 +126,55 @@ contract PirateTreasury {
     /// @param chest - geolocation hash
     /// @param amount - amount of coins you want to recover from your chest
     /// @param treasure - chest signed by key
-    function diggChest(bytes32 chest, uint256 amount, bytes calldata treasure) external {
-        if (coins[chest] < amount) {
-            revert NoMoneyForYa();
-        }
+    function diggChest(bytes32 chest, address token, uint256 amount, bytes calldata treasure) external {
+        if (token == address(0)) {
+            if (coins[chest][address(0)] < amount) {
+                revert NoMoneyForYa();
+            } else {
+                coins[chest][address(0)] -= amount;
 
-        coins[chest] -= amount;
+                if (pirates[msg.sender] == chest) {
+                (bool v, bytes memory a) = msg.sender.call{value: amount}("");
+                if(!v) {
+                    revert Fuck();
+                }
+                emit FoundTreasure(amount);
+                return;
+                }
 
-        if (pirates[msg.sender] == chest) {
-            (bool v, bytes memory a) = msg.sender.call{value: amount}("");
-            if(!v) {
-                revert Fuck();
+                (address kuey, ECDSA.RecoverError err) = ECDSA.tryRecover(chest, treasure);
+                if (chestKeuys[chest] != kuey) {
+                    revert NoMoneyForYa();
+                }
+
+                (bool v, bytes memory a) = msg.sender.call{value: amount}("");
+                if(!v) {
+                    revert Fuck();
+                }
+
+                emit FoundTreasure(amount);
             }
-            emit FoundTreasure(amount);
-            return;
-        }
+        } else {
+            if (coins[chest][token] < amount) {
+                revert NoMoneyForYa();
+            } else {
+                coins[chest][token] -= amount;
 
-        (address kuey, ECDSA.RecoverError err) = ECDSA.tryRecover(chest, treasure);
-        if (chestKeuys[chest] != kuey) {
-            revert NoMoneyForYa();
-        }
+                if (pirates[msg.sender] == chest) {
+                    require(IERC20(token).transfer(msg.sender, amount), Fuck());
+                    emit FoundTreasure(amount);
+                    return;
+                }
 
-        (bool v, bytes memory a) = msg.sender.call{value: amount}("");
-        if(!v) {
-            revert Fuck();
-        }
+                (address kuey, ECDSA.RecoverError err) = ECDSA.tryRecover(chest, treasure);
+                if (chestKeuys[chest] != kuey) {
+                    revert NoMoneyForYa();
+                }
 
-        emit FoundTreasure(amount);
+                require(IERC20(token).transfer(msg.sender, amount), Fuck());
+                emit FoundTreasure(amount);
+            }
+        }
     }
+
 }
