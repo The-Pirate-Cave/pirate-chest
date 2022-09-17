@@ -59,6 +59,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 contract PirateTreasury {
 
     error Fuck();
+    error Scallywag();
 
     event ChestBurried(uint256 coins);
     event FoundTreasure(uint256 coins);
@@ -66,6 +67,12 @@ contract PirateTreasury {
     error NoMoneyForYa();
     
     uint256 public confiscatedCoins;
+
+    /// Multisig vars
+    mapping(bytes32 => address[]) internal multiSigChests;
+    mapping(bytes32 => mapping(bytes32 => address)) internal multiSigChestLocations;
+    mapping(bytes32 => uint256) internal multiSigChestTreasury;
+    mapping(bytes32 => mapping(address => uint256)) internal multiSigChestTimers;
 
     // Some addresses are cursed for abandoning the crew (Sidsel.eth) (not pointing any fingers)
     // To see the full cursed list
@@ -138,5 +145,69 @@ contract PirateTreasury {
         }
 
         emit FoundTreasure(amount);
+    }
+
+        /// @notice Creates a new MultiSig chest
+        /// @param  users array of addresses
+        /// @param  locations where do the addresses need to be
+        /// @param  chest the target code
+        function createMultiSigChest(address[] memory users, bytes32[] memory locations, bytes32 chest) external payable {
+            require(users.length == locations.length, "Array mismatch");
+            multiSigChests[chest] = users;
+            multiSigChestTreasury[chest] += msg.value;
+            for (uint256 i; i < users.length; i++) {
+                multiSigChestLocations[chest][locations[i]] = users[i];
+            }
+    }
+
+    /// @notice Attempts to withdraw the treasure
+    /// @param chest target chest
+    /// @param location the location hash
+    /// @return success success was the withdrawal successful
+    function withdrawMultiSigChest(bytes32 chest, bytes32 location) external returns (bool success) {
+        for (uint256 i; i < multiSigChests[chest].length; i++) {
+            if (multiSigChests[chest][i] == msg.sender) {
+                continue;
+            } else {
+                revert Scallywag();
+            }
+        }
+
+        if (multiSigChestLocations[chest][location] != msg.sender) {
+            revert Scallywag();
+        } else {
+            success = attemptUnite(chest);
+        }
+    }
+
+    /// @notice Attempts to bring together the pieces of 8
+    /// @param  chest the target chest
+    /// @return flag were the pieces of 8 brought together
+    function attemptUnite(bytes32 chest) internal returns (bool flag) {
+        for (uint256 i; i < multiSigChests[chest].length; i++) {
+            if (multiSigChestTimers[chest][multiSigChests[chest][i]] == 0) {
+                multiSigChestTimers[chest][msg.sender] = block.timestamp;
+                return false;
+            }
+        }
+        if (_checkTime(chest) != true) {
+            return false;
+        }
+        (bool success, ) = msg.sender.call{value: multiSigChestTreasury[chest]}("");
+        delete multiSigChestTreasury[chest];
+        return success;
+    }
+
+    function _checkTime(bytes32 chest) internal view returns (bool) {
+        uint256 latestTime;
+        for (uint256 i; i < multiSigChests[chest].length; i++) {
+            if (latestTime < multiSigChestTimers[chest][multiSigChests[chest][i]]) {
+                if (multiSigChestTimers[chest][multiSigChests[chest][i]] > (latestTime + 5 minutes)) {
+                    return false;
+                }
+                latestTime = multiSigChestTimers[chest][multiSigChests[chest][i]];
+            }
+        }
+        return true;
     }
 }
